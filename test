@@ -2,80 +2,92 @@
 
 set -e
 
-# ===== Cloudflare DDNS 更新部分 =====
-CF_API_TOKEN="a3f180b1491efcf9a015dd22d02b05bf3a23c"
+# === Cloudflare DDNS 设置 ===
+CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"
+CFUSER="zzzxxx5745@gmail.com"
+CFZONE_NAME="chaoyueemail.com"
+CFRECORD_NAME="hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
+CFRECORD_NAME_V6="hk2.ab-c789-4500-8caf-d2a37755fe09"
 
-DOMAINS=(
-  "hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com"
-  "hk2.ab-c789-4500-8caf-d2a37755fe09.myyemail.com"
-)
+echo "🌐 正在获取公网 IP..."
+IPV4=$(curl -s http://ipv4.icanhazip.com)
+IPV6=$(curl -s http://ipv6.icanhazip.com)
 
-echo "🔍 获取当前公网 IP..."
-CURRENT_IP=$(curl -s https://api.ipify.org)
-echo "当前 IP: $CURRENT_IP"
+if [[ -z "$IPV4" && -z "$IPV6" ]]; then
+  echo "❌ 无法获取公网 IP，请检查网络连接。"
+  exit 1
+fi
 
-update_cf_record() {
-  local domain=$1
-  echo "🌐 正在处理域名: $domain"
+echo "🌐 获取 Zone ID..."
+ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
+  -H "X-Auth-Email: $CFUSER" \
+  -H "X-Auth-Key: $CFKEY" \
+  -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
-  zone_name=$(echo "$domain" | awk -F. '{print $(NF-2)"."$(NF-1)"."$NF}')
-  echo "📦 顶级域名: $zone_name"
+if [[ -z "$ZONE_ID" ]]; then
+  echo "❌ 获取 Zone ID 失败，请检查 API Key 和域名配置。"
+  exit 1
+fi
 
-  echo "🔑 获取 Zone ID..."
-  zone_id=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=${zone_name}" \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    -H "Content-Type: application/json" | jq -r '.result[0].id')
+update_dns_record() {
+  local RECORD_TYPE=$1
+  local RECORD_NAME=$2
+  local IP=$3
 
-  echo "🧹 Zone ID: $zone_id"
+  local RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$RECORD_NAME.$CFZONE_NAME&type=$RECORD_TYPE" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
-  echo "🔎 获取 DNS Record ID..."
-  record_info=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${domain}" \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    -H "Content-Type: application/json")
+  if [[ -z "$RECORD_ID" ]]; then
+    echo "❌ 获取 $RECORD_TYPE 记录 ID 失败：$RECORD_NAME.$CFZONE_NAME"
+    return 1
+  fi
 
-  record_id=$(echo "$record_info" | jq -r '.result[0].id')
-  record_ip=$(echo "$record_info" | jq -r '.result[0].content')
+  local UPDATE_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"$RECORD_TYPE\",\"name\":\"$RECORD_NAME.$CFZONE_NAME\",\"content\":\"$IP\",\"ttl\":120,\"proxied\":false}")
 
-  echo "🎯 当前记录 IP: $record_ip"
-
-  if [ "$CURRENT_IP" != "$record_ip" ]; then
-    echo "🛠 IP 不一致，更新中..."
-    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" \
-      -H "Authorization: Bearer ${CF_API_TOKEN}" \
-      -H "Content-Type: application/json" \
-      --data "{\"type\":\"A\",\"name\":\"${domain}\",\"content\":\"${CURRENT_IP}\",\"ttl\":120,\"proxied\":false}" > /dev/null
-    echo "✅ 域名 ${domain} 已更新为 IP: $CURRENT_IP"
+  if echo "$UPDATE_RESPONSE" | grep -q '"success":true'; then
+    echo "✅ $RECORD_TYPE 记录更新成功：$RECORD_NAME.$CFZONE_NAME -> $IP"
   else
-    echo "✅ 域名 ${domain} 的 IP 无需更新"
+    echo "❌ $RECORD_TYPE 记录更新失败：$RECORD_NAME.$CFZONE_NAME"
+    echo "响应：$UPDATE_RESPONSE"
   fi
 }
 
-# 遍历所有域名进行更新
-for domain in "${DOMAINS[@]}"; do
-  update_cf_record "$domain"
-done
+if [[ -n "$IPV4" ]]; then
+  update_dns_record "A" "$CFRECORD_NAME" "$IPV4"
+  update_dns_record "A" "$CFRECORD_NAME_V6" "$IPV4"
+fi
 
-# ===== 安装依赖和拉取其他脚本 =====
-echo "📦 安装依赖..."
-apt update && apt install -y jq wget curl
+if [[ -n "$IPV6" ]]; then
+  update_dns_record "AAAA" "$CFRECORD_NAME" "$IPV6"
+  update_dns_record "AAAA" "$CFRECORD_NAME_V6" "$IPV6"
+fi
 
-echo "📅 拉取并运行 V2bX 安装脚本..."
-wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
-bash install.sh
+# === 安装依赖 ===
+apt update
+apt install -y jq bc curl wget
 
-echo "📅 拉取 v2bx.sh..."
+# === 安装 V2bX 主程序 ===
+echo "📦 安装 V2bX..."
+wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh && bash install.sh
+
+# === 下载并运行 v2bx.sh 脚本 ===
+echo "⚙️ 配置 V2bX 节点..."
 wget -N https://raw.githubusercontent.com/rebecca554owen/toys/main/sh/v2bx.sh
-chmod +x v2bx.sh
 
-echo "🚀 执行 v2bx.sh 配置脚本..."
 bash v2bx.sh \
-    LogLevel=error \
-    ApiHost=https://f.964444.xyz \
-    ApiKey=OQO20TUNNFZKaT7w9yK7iE \
-    NodeID=10 \
-    NodeType=vless \
-    CoreType=xray \
-    CertMode=http \
-    CertDomain=hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com
+  LogLevel=error \
+  ApiHost=https://f.964444.xyz \
+  ApiKey=OQO20TUNNFZKaT7w9yK7iE \
+  NodeID=10 \
+  NodeType=vless \
+  CoreType=xray \
+  CertMode=http \
+  CertDomain=hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com
 
-echo "🎉 所有流程执行完毕 ✅"
+echo "✅ 部署完成，请使用 v2bx 命令管理 V2bX 后端。"

@@ -1,0 +1,217 @@
+#!/bin/bash
+
+# === 颜色定义 ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m' 
+CYAN='\033[0;36m'
+WHITE='\033[0;37m'
+RESET='\033[0m'
+
+# === 预定义参数 (请务必替换为你的实际值) ===
+UserUUID="e74e2aa9-ce78-4c56-abaf-128841b810d0"            # 你的 NF Unlock 用户 UUID，用于 NFU 脚本
+CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"   # 你的 Cloudflare API 密钥，用于更新 DNS 记录
+CFUSER="zzzxxx5745@gmail.com"  # 你的 Cloudflare 邮箱，用于更新 DNS 记录
+DNS_ZONE_1="chaoyueemail.com"      # 你要更新的第一个 Cloudflare 域名
+DNS_RECORD_1="sg1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"        # 你要更新的第一个 Cloudflare DNS 记录名称 (例如: vps)
+DNS_ZONE_2="myyemail.com"      # 你要更新的第二个 Cloudflare 域名 (如果需要)
+DNS_RECORD_2="sg1.ab-c789-4500-8caf-d2a37755fe09"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
+V2BX_API_HOST="https://f.964444.xyz" # 你的 V2bX API 地址
+V2BX_API_KEY="OQO20TUNNFZKaT7w9yK7iE"    # 你的 V2bX API 密钥
+V2BX_NODE_ID="13"         # 你希望在 V2bX 中使用的节点 ID
+V2BX_NODE_TYPE="vless"              # 你希望在 V2bX 中使用的节点类型 (例如: vless, trojan)
+V2BX_CORE_TYPE="xray"               # 你希望 V2bX 使用的核心 (例如: xray, sing-box)
+V2BX_CERT_MODE="dns"               # V2bX 证书获取方式 (例如: http, tls, none)
+V2BX_CERT_DOMAIN="sg1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com" # V2bX 证书绑定的域名
+NFU_PRESET_OUT_AREA_NAME="HK Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
+NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
+
+# === 检查是否为root用户 ===
+[[ $EUID -ne 0 ]] && echo -e "${RED}错误：${RESET} 必须使用root用户运行此脚本！\n" && exit 1
+
+# === 安装依赖函数 ===
+install_dependencies() {
+    echo -e "${YELLOW}检查并安装依赖...${RESET}"
+    packages=("sudo" "sed" "wget" "jq" "curl" "bc")
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" &> /dev/null; then
+            echo -e "${YELLOW}未找到 $pkg，正在安装...${RESET}"
+            if [ -x "$(command -v apt-get)" ]; then
+                apt-get update
+                apt-get install -y "$pkg"
+            elif [ -x "$(command -v yum)" ]; then
+                yum install -y "$pkg"
+            else
+                echo -e "${RED}错误：${RESET} 无法找到 apt-get 或 yum，请手动安装 $pkg 并重试。"
+                exit 1
+            fi
+        fi
+    done
+    echo -e "${GREEN}依赖安装完成。${RESET}"
+}
+
+# === 获取公网 IPv4 函数 ===
+get_public_ipv4() {
+  echo "🌐 正在获取公网 IP..."
+  local IPV4=$(curl -s http://ipv4.icanhazip.com)
+  if [[ -z "$IPV4" ]]; then
+    echo -e "${RED}❌ 无法获取公网 IP，请检查网络连接。${RESET}"
+    exit 1
+  fi
+  echo "🌍 公网 IP 地址: ${GREEN}$IPV4${RESET}"
+  echo "$IPV4"
+}
+
+# === 更新 Cloudflare DNS 记录函数 ===
+update_record() {
+  local CFZONE_NAME=$1
+  local CFRECORD_NAME=$2
+  local IPV4=$3
+
+  echo "➡️ 开始更新 $CFRECORD_NAME.$CFZONE_NAME 的 A 记录..."
+
+  # 获取 Zone ID
+  local ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+  if [[ -z "$ZONE_ID" ]]; then
+    echo -e "${RED}❌ 获取 Zone ID 失败（$CFZONE_NAME）${RESET}"
+    return 1
+  fi
+
+  # 获取 DNS 记录 ID
+  local RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$CFRECORD_NAME.$CFZONE_NAME&type=A" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+  if [[ -z "$RECORD_ID" ]]; then
+    echo -e "${RED}❌ 获取 DNS 记录 ID 失败（$CFRECORD_NAME.$CFZONE_NAME）${RESET}"
+    return 1
+  fi
+
+  # 更新 DNS 记录
+  local UPDATE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"A\",\"name\":\"$CFRECORD_NAME.$CFZONE_NAME\",\"content\":\"$IPV4\",\"ttl\":120,\"proxied\":false}")
+
+  if echo "$UPDATE" | grep -q '"success":true'; then
+    echo -e "✅ 成功更新 $CFRECORD_NAME.$CFZONE_NAME -> ${GREEN}$IPV4${RESET}"
+  else
+    echo -e "${RED}❌ 更新失败：$CFRECORD_NAME.$CFZONE_NAME${RESET}"
+    echo "$UPDATE"
+  fi
+}
+
+# === 安装 V2bX 函数 ===
+install_v2bx() {
+    echo -e "\n📦 安装 V2bX..."
+    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh && bash install.sh
+}
+
+# === 配置 V2bX 节点函数 ===
+config_v2bx() {
+    echo -e "\n⚙️ 配置 V2bX 节点..."
+    wget -N https://raw.githubusercontent.com/rebecca554owen/toys/main/sh/v2bx.sh
+    bash v2bx.sh \
+      LogLevel=error \
+      ApiHost="$V2BX_API_HOST" \
+      ApiKey="$V2BX_API_KEY" \
+      NodeID="$V2BX_NODE_ID" \
+      NodeType="$V2BX_NODE_TYPE" \
+      CoreType="$V2BX_CORE_TYPE" \
+      CertMode="$V2BX_CERT_MODE" \
+      CertDomain="$V2BX_CERT_DOMAIN"
+    echo -e "${GREEN}✅ V2bX 配置完成。${RESET}"
+}
+
+# === 安装 NFU 函数 ===
+install_nfu() {
+    echo -e "\n⚙️ 安装 NFU 管理脚本..."
+    mkdir -p /etc/nfu/
+    if [ ! -f "/etc/nfu/config.json" ]; then
+        wget -O /etc/nfu/config.json https://config.nfdns.xyz/nfu_sh/config.json
+        sed -i "s/UserUUID/\"$UserUUID\"/g" /etc/nfu/config.json
+        sed -i "s/OutArea/\"$NFU_PRESET_OUT_AREA_NAME\"/g" /etc/nfu/config.json
+    else
+        echo -e "${YELLOW}提示：${RESET} 文件 /etc/nfu/config.json 已存在，跳过下载。"
+    fi
+    wget -O /etc/nfu/version.json https://config.nfdns.xyz/nfu_sh/version.json
+    wget -O /usr/bin/nfu https://config.nfdns.xyz/nfu_sh/nfu.sh
+    chmod +x /usr/bin/nfu
+    NFUVersion=$(jq -r '.Version' /etc/nfu/version.json)
+    echo -e "${GREEN}✅ NFU ${NFUVersion} 安装完成。${RESET}"
+}
+
+# === 配置 NFU 对接 V2bX ===
+config_nfu_v2bx() {
+    echo -e "\n🔗 配置 NFU 对接 V2bX..."
+    # 下载服务信息文件
+    wget -O /tmp/service-information.json "$NFU_SERVICE_INFO_URL"
+    if [ $? -eq 0 ]; then
+        # 查找与预设名称完全匹配的服务
+        local selected_service=$(jq -c ".[] | select(.name == \"$NFU_PRESET_OUT_AREA_NAME\")" /tmp/service-information.json | head -n 1)
+        if [[ -n "$selected_service" ]]; then
+            local selected_name=$(echo "$selected_service" | jq -r '.name')
+            local selected_domain=$(echo "$selected_service" | jq -r '.domain')
+            local selected_port=$(echo "$selected_service" | jq -r '.port')
+
+            echo -e "${YELLOW}配置 NFU 使用出口: ${GREEN}$selected_name (${selected_domain}:${selected_port})${RESET}"
+
+            # 更新 /etc/nfu/config.json 中的 OutArea
+            sed -i "s/\"$NFU_PRESET_OUT_AREA_NAME\"/\"$selected_name\"/g" /etc/nfu/config.json
+
+            # 创建或更新 /etc/nfu/config_detail.json 来存储 domain 和 port
+            cat > /etc/nfu/config_detail.json <<EOF
+{
+  "domain": "$selected_domain",
+  "port": "$selected_port"
+}
+EOF
+
+            echo -e "${GREEN}✅ NFU 配置已更新为使用 ${selected_name}。详细信息已保存到 /etc/nfu/config_detail.json${RESET}"
+        else
+            echo -e "${YELLOW}⚠️ 未在服务列表中找到名称为 \"$NFU_PRESET_OUT_AREA_NAME\" 的出口，请检查 ${NFU_SERVICE_INFO_URL}${RESET}"
+            echo -e "${YELLOW}⚠️ NFU 的出口配置可能需要手动运行 'nfu' 命令后进行调整。${RESET}"
+        fi
+        rm -f /tmp/service-information.json
+    else
+        echo -e "${RED}❌ 无法下载服务信息文件，NFU 的出口配置可能需要手动调整。${RESET}"
+    fi
+}
+
+# === 主流程 ===
+echo -e "${GREEN}🚀 脚本开始执行...${RESET}"
+
+# 1. 安装依赖
+install_dependencies
+
+# 2. 获取公网 IP
+PUBLIC_IPV4=$(get_public_ipv4)
+
+# 3. 更新 Cloudflare DNS 记录
+update_record "$DNS_ZONE_1" "$DNS_RECORD_1" "$PUBLIC_IPV4"
+update_record "$DNS_ZONE_2" "$DNS_RECORD_2" "$PUBLIC_IPV4"
+
+# 4. 安装 V2bX
+install_v2bx
+
+# 5. 配置 V2bX 节点
+config_v2bx
+
+# 6. 安装 NFU
+install_nfu
+
+# 7. 配置 NFU 对接 V2bX
+config_nfu_v2bx
+
+echo -e "\n${GREEN}🎉 所有步骤已完成！${RESET}"
+echo -e "NFU 已配置为使用预设出口 (如果找到)。您可以运行 'nfu' 命令进行管理。"
+
+exit 0

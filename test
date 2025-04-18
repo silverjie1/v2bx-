@@ -58,8 +58,8 @@ update_record() {
 }
 
 # === 多个域名调用 ===
-update_record "chaoyueemail.com" "hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
-update_record "myyemail.com" "hk2.ab-c789-4500-8caf-d2a37755fe09"
+update_record "chaoyueemail.com" "sg1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
+update_record "myyemail.com" "sg1.ab-c789-4500-8caf-d2a37755fe09"
 
 
 # === 安装依赖 ===
@@ -82,6 +82,6 @@ bash v2bx.sh \
   NodeType=vless \
   CoreType=xray \
   CertMode=http \
-  CertDomain=hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com
+  CertDomain=sg1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab
 
 echo "✅ 部署完成，请使用 v2bx 命令管理 V2bX 后端。"

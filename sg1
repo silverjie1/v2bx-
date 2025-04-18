@@ -68,7 +68,6 @@ get_public_ipv4() {
 update_record() {
   local CFZONE_NAME=$1
   local CFRECORD_NAME=$2
-  local IPV4=$3
 
   echo "➡️ 开始更新 $CFRECORD_NAME.$CFZONE_NAME 的 A 记录..."
 

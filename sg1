@@ -52,19 +52,16 @@ install_dependencies() {
     echo -e "${GREEN}依赖安装完成。${RESET}"
 }
 
-# === 获取公网 IPv4 函数 ===
-get_public_ipv4() {
-  echo "🌐 正在获取公网 IP..."
-  local IPV4=$(curl -s http://ipv4.icanhazip.com)
-  if [[ -z "$IPV4" ]]; then
-    echo -e "${RED}❌ 无法获取公网 IP，请检查网络连接。${RESET}"
-    exit 1
-  fi
-  echo "🌍 公网 IP 地址: ${GREEN}$IPV4${RESET}"
-  echo "$IPV4"
-}
+# 获取公网 IPv4
+echo "🌐 正在获取公网 IP..."
+IPV4=$(curl -s http://ipv4.icanhazip.com)
 
-# === 更新 Cloudflare DNS 记录函数 ===
+if [[ -z "$IPV4" ]]; then
+  echo "❌ 无法获取公网 IP，请检查网络连接。"
+  exit 1
+fi
+
+# 更新记录函数
 update_record() {
   local CFZONE_NAME=$1
   local CFRECORD_NAME=$2
@@ -72,41 +69,45 @@ update_record() {
   echo "➡️ 开始更新 $CFRECORD_NAME.$CFZONE_NAME 的 A 记录..."
 
   # 获取 Zone ID
-  local ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
+  ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
     -H "X-Auth-Email: $CFUSER" \
     -H "X-Auth-Key: $CFKEY" \
-    -H "Content-Type: application/json" | jq -r '.result[0].id')
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
-  if [[ -z "$ZONE_ID" || "$ZONE_ID" == "null" ]]; then
-    echo -e "${RED}❌ 获取 Zone ID 失败（$CFZONE_NAME）${RESET}"
+  if [[ -z "$ZONE_ID" ]]; then
+    echo "❌ 获取 Zone ID 失败（$CFZONE_NAME）"
     return 1
   fi
 
   # 获取 DNS 记录 ID
-  local RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$CFRECORD_NAME.$CFZONE_NAME&type=A" \
+  RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$CFRECORD_NAME.$CFZONE_NAME&type=A" \
     -H "X-Auth-Email: $CFUSER" \
     -H "X-Auth-Key: $CFKEY" \
-    -H "Content-Type: application/json" | jq -r '.result[0].id')
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
-  if [[ -z "$RECORD_ID" || "$RECORD_ID" == "null" ]]; then
-    echo -e "${RED}❌ 获取 DNS 记录 ID 失败（$CFRECORD_NAME.$CFZONE_NAME）${RESET}"
+  if [[ -z "$RECORD_ID" ]]; then
+    echo "❌ 获取 DNS 记录 ID 失败（$CFRECORD_NAME.$CFZONE_NAME）"
     return 1
   fi
 
   # 更新 DNS 记录
-  local UPDATE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+  UPDATE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
     -H "X-Auth-Email: $CFUSER" \
     -H "X-Auth-Key: $CFKEY" \
     -H "Content-Type: application/json" \
-    --data "{\"type\":\"A\",\"name\":\"$CFRECORD_NAME\",\"content\":\"$IPV4\",\"ttl\":120,\"proxied\":false}")
+    --data "{\"type\":\"A\",\"name\":\"$CFRECORD_NAME.$CFZONE_NAME\",\"content\":\"$IPV4\",\"ttl\":120,\"proxied\":false}")
 
-  if echo "$UPDATE" | jq -e '.success' > /dev/null; then
-    echo -e "✅ 成功更新 $CFRECORD_NAME.$CFZONE_NAME -> ${GREEN}$IPV4${RESET}"
+  if echo "$UPDATE" | grep -q '"success":true'; then
+    echo "✅ 成功更新 $CFRECORD_NAME.$CFZONE_NAME -> $IPV4"
   else
-    echo -e "${RED}❌ 更新失败：$CFRECORD_NAME.$CFZONE_NAME${RESET}"
+    echo "❌ 更新失败：$CFRECORD_NAME.$CFZONE_NAME"
     echo "$UPDATE"
   fi
 }
+
+# === 多个域名调用 ===
+update_record "chaoyueemail.com" "sg1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
+update_record "myyemail.com" "sg1.ab-c789-4500-8caf-d2a37755fe09"
 
 # === 安装 V2bX 函数 ===
 install_v2bx() {

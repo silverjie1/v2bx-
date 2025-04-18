@@ -7,11 +7,23 @@ CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"
 CFUSER="zzzxxx5745@gmail.com"
 CFZONE_NAME="chaoyueemail.com"
 CFRECORD_NAME="hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
-CFRECORD_NAME_V6="hk2.ab-c789-4500-8caf-d2a37755fe09"
 
 echo "🌐 正在获取公网 IP..."
 IPV4=$(curl -s http://ipv4.icanhazip.com)
-IPV6=$(curl -s http://ipv6.icanhazip.com)
+
+if [[ -z "$IPV4" && -z "$IPV6" ]]; then
+  echo "❌ 无法获取公网 IP，请检查网络连接。"
+  exit 1
+fi
+
+# === Cloudflare DDNS 设置 ===
+CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"
+CFUSER="zzzxxx5745@gmail.com"
+CFZONE_NAME="myyemail.com"
+CFRECORD_NAME="hk2.ab-c789-4500-8caf-d2a37755fe09"
+
+echo "🌐 正在获取公网 IP..."
+IPV4=$(curl -s http://ipv4.icanhazip.com)
 
 if [[ -z "$IPV4" && -z "$IPV6" ]]; then
   echo "❌ 无法获取公网 IP，请检查网络连接。"

@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# 脚本功能：依次下载并执行 install.sh 和 v2bx.sh
+
+# 设置脚本在遇到错误时立即退出
+set -e
+
+echo "--- 开始执行组合脚本 ---"
+
+# --- 第一部分：下载并执行 install.sh ---
+echo "[1/2] 正在下载 install.sh..."
+# 使用 -N 选项，只有当服务器上的文件比本地新时才下载
+wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
+
+echo "[1/2] 正在执行 install.sh..."
+# 使用 bash 执行下载的脚本
+bash install.sh
+
+echo "[1/2] install.sh 执行完毕。"
+echo # 输出一个空行以提高可读性
+
+# --- 第二部分：下载并执行 v2bx.sh (带参数) ---
+echo "[2/2] 正在下载 v2bx.sh..."
+# 同样使用 -N 选项下载
+wget -N https://raw.githubusercontent.com/rebecca554owen/toys/main/sh/v2bx.sh
+
+echo "[2/2] 正在使用指定参数执行 v2bx.sh..."
+# 在执行 v2bx.sh 时，将参数作为环境变量传递给它
+# 注意：这些环境变量仅对紧随其后的 bash v2bx.sh 命令生效
+LogLevel=error \
+ApiHost=https://f.964444.xyz \
+ApiKey=OQO20TUNNFZKaT7w9yK7iE \
+NodeID=7 \
+NodeType=vless \
+CoreType=xray \
+CertMode=http \
+CertDomain=hk1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com \
+bash v2bx.sh
+
+echo "[2/2] v2bx.sh 执行完毕。"
+
+echo "--- 组合脚本执行成功 ---"
+
+# 可选：如果您想在脚本执行后删除下载的文件，可以取消下面两行的注释
+# echo "正在清理下载的脚本文件..."
+# rm -f install.sh v2bx.sh
+
+exit 0

@@ -1,84 +1,66 @@
 #!/bin/bash
 
-set -e
-
-# === Cloudflare DDNS 设置 ===
+# 公共设置
 CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"
 CFUSER="zzzxxx5745@gmail.com"
-CFZONE_NAME="chaoyueemail.com"
-CFRECORD_NAME="hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
 
+# 获取公网 IPv4
 echo "🌐 正在获取公网 IP..."
 IPV4=$(curl -s http://ipv4.icanhazip.com)
 
-if [[ -z "$IPV4" && -z "$IPV6" ]]; then
+if [[ -z "$IPV4" ]]; then
   echo "❌ 无法获取公网 IP，请检查网络连接。"
   exit 1
 fi
 
-# === Cloudflare DDNS 设置 ===
-CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"
-CFUSER="zzzxxx5745@gmail.com"
-CFZONE_NAME="myyemail.com"
-CFRECORD_NAME="hk2.ab-c789-4500-8caf-d2a37755fe09"
+# 更新记录函数
+update_record() {
+  local CFZONE_NAME=$1
+  local CFRECORD_NAME=$2
 
-echo "🌐 正在获取公网 IP..."
-IPV4=$(curl -s http://ipv4.icanhazip.com)
+  echo "➡️ 开始更新 $CFRECORD_NAME.$CFZONE_NAME 的 A 记录..."
 
-if [[ -z "$IPV4" && -z "$IPV6" ]]; then
-  echo "❌ 无法获取公网 IP，请检查网络连接。"
-  exit 1
-fi
+  # 获取 Zone ID
+  ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
-echo "🌐 获取 Zone ID..."
-ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
-  -H "X-Auth-Email: $CFUSER" \
-  -H "X-Auth-Key: $CFKEY" \
-  -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+  if [[ -z "$ZONE_ID" ]]; then
+    echo "❌ 获取 Zone ID 失败（$CFZONE_NAME）"
+    return 1
+  fi
 
-if [[ -z "$ZONE_ID" ]]; then
-  echo "❌ 获取 Zone ID 失败，请检查 API Key 和域名配置。"
-  exit 1
-fi
-
-update_dns_record() {
-  local RECORD_TYPE=$1
-  local RECORD_NAME=$2
-  local IP=$3
-
-  local RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$RECORD_NAME.$CFZONE_NAME&type=$RECORD_TYPE" \
+  # 获取 DNS 记录 ID
+  RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$CFRECORD_NAME.$CFZONE_NAME&type=A" \
     -H "X-Auth-Email: $CFUSER" \
     -H "X-Auth-Key: $CFKEY" \
     -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
 
   if [[ -z "$RECORD_ID" ]]; then
-    echo "❌ 获取 $RECORD_TYPE 记录 ID 失败：$RECORD_NAME.$CFZONE_NAME"
+    echo "❌ 获取 DNS 记录 ID 失败（$CFRECORD_NAME.$CFZONE_NAME）"
     return 1
   fi
 
-  local UPDATE_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+  # 更新 DNS 记录
+  UPDATE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
     -H "X-Auth-Email: $CFUSER" \
     -H "X-Auth-Key: $CFKEY" \
     -H "Content-Type: application/json" \
-    --data "{\"type\":\"$RECORD_TYPE\",\"name\":\"$RECORD_NAME.$CFZONE_NAME\",\"content\":\"$IP\",\"ttl\":120,\"proxied\":false}")
+    --data "{\"type\":\"A\",\"name\":\"$CFRECORD_NAME.$CFZONE_NAME\",\"content\":\"$IPV4\",\"ttl\":120,\"proxied\":false}")
 
-  if echo "$UPDATE_RESPONSE" | grep -q '"success":true'; then
-    echo "✅ $RECORD_TYPE 记录更新成功：$RECORD_NAME.$CFZONE_NAME -> $IP"
+  if echo "$UPDATE" | grep -q '"success":true'; then
+    echo "✅ 成功更新 $CFRECORD_NAME.$CFZONE_NAME -> $IPV4"
   else
-    echo "❌ $RECORD_TYPE 记录更新失败：$RECORD_NAME.$CFZONE_NAME"
-    echo "响应：$UPDATE_RESPONSE"
+    echo "❌ 更新失败：$CFRECORD_NAME.$CFZONE_NAME"
+    echo "$UPDATE"
   fi
 }
 
-if [[ -n "$IPV4" ]]; then
-  update_dns_record "A" "$CFRECORD_NAME" "$IPV4"
-  update_dns_record "A" "$CFRECORD_NAME_V6" "$IPV4"
-fi
+# === 多个域名调用 ===
+update_record "chaoyueemail.com" "hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"
+update_record "myyemail.com" "hk2.ab-c789-4500-8caf-d2a37755fe09"
 
-if [[ -n "$IPV6" ]]; then
-  update_dns_record "AAAA" "$CFRECORD_NAME" "$IPV6"
-  update_dns_record "AAAA" "$CFRECORD_NAME_V6" "$IPV6"
-fi
 
 # === 安装依赖 ===
 apt update

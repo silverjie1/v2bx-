@@ -30,11 +30,11 @@ echo "[2/2] 正在使用指定参数执行 v2bx.sh..."
 LogLevel=error \
 ApiHost=https://f.964444.xyz \
 ApiKey=OQO20TUNNFZKaT7w9yK7iE \
-NodeID=7 \
+NodeID=10 \
 NodeType=vless \
 CoreType=xray \
 CertMode=http \
-CertDomain=hk1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com \
+CertDomain=hk2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com \
 bash v2bx.sh
 
 echo "[2/2] v2bx.sh 执行完毕。"

@@ -5,7 +5,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m' 
+PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[0;37m'
 RESET='\033[0m'
@@ -54,13 +54,11 @@ install_dependencies() {
 
 # === 获取公网 IPv4 函数 ===
 get_public_ipv4() {
-  echo "🌐 正在获取公网 IP..."
   local IPV4=$(curl -s http://ipv4.icanhazip.com)
   if [[ -z "$IPV4" ]]; then
     echo -e "${RED}❌ 无法获取公网 IP，请检查网络连接。${RESET}"
     exit 1
   fi
-  echo "🌍 公网 IP 地址: ${GREEN}$IPV4${RESET}"
   echo "$IPV4"
 }
 
@@ -112,7 +110,8 @@ update_record() {
 # === 安装 V2bX 函数 ===
 install_v2bx() {
     echo -e "\n📦 安装 V2bX..."
-    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh && bash install.sh
+    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
+    echo -e "n" | bash install.sh
 }
 
 # === 配置 V2bX 节点函数 ===
@@ -127,7 +126,9 @@ config_v2bx() {
       NodeType="$V2BX_NODE_TYPE" \
       CoreType="$V2BX_CORE_TYPE" \
       CertMode="$V2BX_CERT_MODE" \
-      CertDomain="$V2BX_CERT_DOMAIN"
+      CertDomain="$V2BX_CERT_DOMAIN" \
+      CF_API_EMAIL="$CFUSER" \
+      CF_API_KEY="$CFKEY"
     echo -e "${GREEN}✅ V2bX 配置完成。${RESET}"
 }
 
@@ -192,23 +193,20 @@ echo -e "${GREEN}🚀 脚本开始执行...${RESET}"
 # 1. 安装依赖
 install_dependencies
 
-# 2. 获取公网 IP
-PUBLIC_IPV4=$(get_public_ipv4)
+# 2. 更新 Cloudflare DNS 记录 (直接调用 get_public_ipv4)
+update_record "$DNS_ZONE_1" "$DNS_RECORD_1" "$(get_public_ipv4)"
+update_record "$DNS_ZONE_2" "$DNS_RECORD_2" "$(get_public_ipv4)"
 
-# 3. 更新 Cloudflare DNS 记录
-update_record "$DNS_ZONE_1" "$DNS_RECORD_1" "$PUBLIC_IPV4"
-update_record "$DNS_ZONE_2" "$DNS_RECORD_2" "$PUBLIC_IPV4"
-
-# 4. 安装 V2bX
+# 3. 安装 V2bX
 install_v2bx
 
-# 5. 配置 V2bX 节点
+# 4. 配置 V2bX 节点
 config_v2bx
 
-# 6. 安装 NFU
+# 5. 安装 NFU
 install_nfu
 
-# 7. 配置 NFU 对接 V2bX
+# 6. 配置 NFU 对接 V2bX
 config_nfu_v2bx
 
 echo -e "\n${GREEN}🎉 所有步骤已完成！${RESET}"

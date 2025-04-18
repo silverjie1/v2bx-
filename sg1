@@ -108,7 +108,6 @@ update_record() {
     echo "$UPDATE"
   fi
 }
-}
 
 # === 安装 V2bX 函数 ===
 install_v2bx() {

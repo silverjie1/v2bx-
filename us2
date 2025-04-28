@@ -20,12 +20,12 @@ DNS_ZONE_2="myyemail.com"      # 你要更新的第二个 Cloudflare 域名 (如
 DNS_RECORD_2="us2"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
 V2BX_API_HOST="https://f.964444.xyz" # 你的 V2bX API 地址
 V2BX_API_KEY="OQO20TUNNFZKaT7w9yK7iE"    # 你的 V2bX API 密钥
-V2BX_NODE_ID="7"         # 你希望在 V2bX 中使用的节点 ID
+V2BX_NODE_ID="17"         # 你希望在 V2bX 中使用的节点 ID
 V2BX_NODE_TYPE="vless"              # 你希望在 V2bX 中使用的节点类型 (例如: vless, trojan)
 V2BX_CORE_TYPE="xray"               # 你希望 V2bX 使用的核心 (例如: xray, sing-box)
-V2BX_CERT_MODE="dns"               # V2bX 证书获取方式 (例如: http, tls, none)
+V2BX_CERT_MODE="http"               # V2bX 证书获取方式 (例如: http, tls, none)
 V2BX_CERT_DOMAIN="us2.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com" # V2bX 证书绑定的域名
-NFU_PRESET_OUT_AREA_NAME="HK Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
+NFU_PRESET_OUT_AREA_NAME="US Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
 NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
 
 # === 检查是否为root用户 ===

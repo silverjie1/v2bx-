@@ -114,6 +114,9 @@ install_v2bx() {
     echo -e "n" | bash install.sh
 }
 
+echo -e "${CYAN}⏳ 等待 2 分钟以确保 DNS 记录生效...${RESET}"
+sleep 120
+
 # === 配置 V2bX 节点函数 ===
 config_v2bx() {
     echo -e "\n⚙️ 配置 V2bX 节点..."

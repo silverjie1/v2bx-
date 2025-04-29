@@ -107,6 +107,9 @@ update_record() {
   fi
 }
 
+echo -e "${CYAN}⏳ 等待 2 分钟以确保 DNS 记录生效...${RESET}"
+sleep 120
+
 # === 安装 V2bX 函数 ===
 install_v2bx() {
     echo -e "\n📦 安装 V2bX..."

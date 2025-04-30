@@ -15,7 +15,7 @@ UserUUID="e74e2aa9-ce78-4c56-abaf-128841b810d0"            # 你的 NF Unlock �
 CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"   # 你的 Cloudflare API 密钥，用于更新 DNS 记录
 CFUSER="zzzxxx5745@gmail.com"  # 你的 Cloudflare 邮箱，用于更新 DNS 记录
 DNS_ZONE_1="chaoyueemail.com"      # 你要更新的第一个 Cloudflare 域名
-DNS_RECORD_1="jp1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab"        # 你要更新的第一个 Cloudflare DNS 记录名称 (例如: vps)
+DNS_RECORD_1="jp1"        # 你要更新的第一个 Cloudflare DNS 记录名称 (例如: vps)
 DNS_ZONE_2="myyemail.com"      # 你要更新的第二个 Cloudflare 域名 (如果需要)
 DNS_RECORD_2="jp1.ab-c789-4500-8caf-d2a37755fe09"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
 V2BX_API_HOST="https://f.964444.xyz" # 你的 V2bX API 地址
@@ -24,7 +24,7 @@ V2BX_NODE_ID="12"         # 你希望在 V2bX 中使用的节点 ID
 V2BX_NODE_TYPE="vless"              # 你希望在 V2bX 中使用的节点类型 (例如: vless, trojan)
 V2BX_CORE_TYPE="xray"               # 你希望 V2bX 使用的核心 (例如: xray, sing-box)
 V2BX_CERT_MODE="dns"               # V2bX 证书获取方式 (例如: http, tls, none)
-V2BX_CERT_DOMAIN="jp1.b01d1e-cdd6-4a11-9fb8-1c45613e3eab.chaoyueemail.com" # V2bX 证书绑定的域名
+V2BX_CERT_DOMAIN="jp1.chaoyueemail.com" # V2bX 证书绑定的域名
 NFU_PRESET_OUT_AREA_NAME="JP Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
 NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
 

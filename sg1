@@ -28,6 +28,7 @@ V2BX_CERT_DOMAIN="sg1.chaoyueemail.com" # V2bX 证书绑定的域名
 NFU_PRESET_OUT_AREA_NAME="SG Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
 NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
 
+
 # === 检查是否为root用户 ===
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：${RESET} 必须使用root用户运行此脚本！\n" && exit 1
 
@@ -107,9 +108,6 @@ update_record() {
   fi
 }
 
-echo -e "${CYAN}⏳ 等待 2 分钟以确保 DNS 记录生效...${RESET}"
-sleep 120
-
 # === 安装 V2bX 函数 ===
 install_v2bx() {
     echo -e "\n📦 安装 V2bX..."
@@ -155,58 +153,65 @@ config_v2bx() {
     echo -e "${GREEN}✅ V2bX 配置完成。${RESET}"
 }
 
-# === 安装 NFU 函数 ===
-install_nfu() {
-    echo -e "\n⚙️ 安装 NFU 管理脚本..."
-    mkdir -p /etc/nfu/
-    if [ ! -f "/etc/nfu/config.json" ]; then
-        wget -O /etc/nfu/config.json https://config.nfdns.xyz/nfu_sh/config.json
-        sed -i "s/UserUUID/\"$UserUUID\"/g" /etc/nfu/config.json
-        sed -i "s/OutArea/\"$NFU_PRESET_OUT_AREA_NAME\"/g" /etc/nfu/config.json
-    else
-        echo -e "${YELLOW}提示：${RESET} 文件 /etc/nfu/config.json 已存在，跳过下载。"
-    fi
-    wget -O /etc/nfu/version.json https://config.nfdns.xyz/nfu_sh/version.json
-    wget -O /usr/bin/nfu https://config.nfdns.xyz/nfu_sh/nfu.sh
-    chmod +x /usr/bin/nfu
-    NFUVersion=$(jq -r '.Version' /etc/nfu/version.json)
-    echo -e "${GREEN}✅ NFU ${NFUVersion} 安装完成。${RESET}"
-}
-
-# === 配置 NFU 对接 V2bX ===
-config_nfu_v2bx() {
-    echo -e "\n🔗 配置 NFU 对接 V2bX..."
+# === 配置 V2bX 出口 ===
+config_v2bx_outbound() {
+    echo -e "\n⚙️ 配置 V2bX 出口..."
     # 下载服务信息文件
-    wget -O /tmp/service-information.json "$NFU_SERVICE_INFO_URL"
+    wget -O /tmp/service-information.json "$SERVICE_INFO_URL"
     if [ $? -eq 0 ]; then
         # 查找与预设名称完全匹配的服务
-        local selected_service=$(jq -c ".[] | select(.name == \"$NFU_PRESET_OUT_AREA_NAME\")" /tmp/service-information.json | head -n 1)
+        local selected_service=$(jq -c ".[] | select(.name == \"$PRESET_OUT_AREA_NAME\")" /tmp/service-information.json | head -n 1)
         if [[ -n "$selected_service" ]]; then
-            local selected_name=$(echo "$selected_service" | jq -r '.name')
             local selected_domain=$(echo "$selected_service" | jq -r '.domain')
             local selected_port=$(echo "$selected_service" | jq -r '.port')
+            local selected_cipher=$(echo "$selected_service" | jq -r '.cipher')
 
-            echo -e "${YELLOW}配置 NFU 使用出口: ${GREEN}$selected_name (${selected_domain}:${selected_port})${RESET}"
-
-            # 更新 /etc/nfu/config.json 中的 OutArea
-            sed -i "s/\"$NFU_PRESET_OUT_AREA_NAME\"/\"$selected_name\"/g" /etc/nfu/config.json
-
-            # 创建或更新 /etc/nfu/config_detail.json 来存储 domain 和 port
-            cat > /etc/nfu/config_detail.json <<EOF
-{
-  "domain": "$selected_domain",
-  "port": "$selected_port"
-}
+            local config_json=$(cat <<EOF
+[
+  {
+    "tag": "IPv4_out",
+    "sendThrough": "0.0.0.0",
+    "protocol": "freedom"
+  },
+  {
+    "protocol": "blackhole",
+    "tag": "block"
+  },
+  {
+    "protocol": "Shadowsocks",
+    "settings": {
+      "servers": [
+        {
+          "address": "$selected_domain",
+          "port": $selected_port,
+          "method": "$selected_cipher",
+          "password": "$UserUUID"
+        }
+      ]
+    },
+    "tag": "unlock"
+  }
+]
 EOF
-
-            echo -e "${GREEN}✅ NFU 配置已更新为使用 ${selected_name}。详细信息已保存到 /etc/nfu/config_detail.json${RESET}"
+)
+            # 将生成的 JSON 写入 V2bX 配置文件
+            echo "$config_json" | sudo tee "$V2BX_CONFIG_FILE" > /dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✅ V2bX 出口配置已更新为 ${PRESET_OUT_AREA_NAME} (${selected_domain}:${selected_port}).${RESET}"
+                # 可以选择在这里重启 V2bX 服务，如果需要立即生效
+                if command -v v2bx >/dev/null 2>&1; then
+                    sudo v2bx restart
+                    echo -e "${GREEN}✅ V2bX 服务已重启以应用配置。${RESET}"
+                fi
+            else
+                echo -e "${RED}❌ 写入 V2bX 配置文件失败，请检查权限或文件路径。${RESET}"
+            fi
         else
-            echo -e "${YELLOW}⚠️ 未在服务列表中找到名称为 \"$NFU_PRESET_OUT_AREA_NAME\" 的出口，请检查 ${NFU_SERVICE_INFO_URL}${RESET}"
-            echo -e "${YELLOW}⚠️ NFU 的出口配置可能需要手动运行 'nfu' 命令后进行调整。${RESET}"
+            echo -e "${YELLOW}⚠️ 未在服务列表中找到名称为 \"$PRESET_OUT_AREA_NAME\" 的出口，请检查 ${SERVICE_INFO_URL}${RESET}"
         fi
         rm -f /tmp/service-information.json
     else
-        echo -e "${RED}❌ 无法下载服务信息文件，NFU 的出口配置可能需要手动调整。${RESET}"
+        echo -e "${RED}❌ 无法下载服务信息文件，无法配置 V2bX 出口。${RESET}"
     fi
 }
 
@@ -226,13 +231,10 @@ install_v2bx
 # 4. 配置 V2bX 节点
 config_v2bx
 
-# 5. 安装 NFU
-install_nfu
-
-# 6. 配置 NFU 对接 V2bX
-config_nfu_v2bx
+# 5. 配置 V2bX 出口
+config_v2bx_outbound
 
 echo -e "\n${GREEN}🎉 所有步骤已完成！${RESET}"
-echo -e "NFU 已配置为使用预设出口 (如果找到)。您可以运行 'nfu' 命令进行管理。"
+echo -e "V2bX 已安装并配置为使用 ${PRESET_OUT_AREA_NAME} 出口 (如果找到)。"
 
 exit 0

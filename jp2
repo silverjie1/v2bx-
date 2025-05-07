@@ -27,7 +27,10 @@ V2BX_CERT_MODE="dns"               # V2bX 证书获取方式 (例如: http, tls,
 V2BX_CERT_DOMAIN="jp2.chaoyueemail.com" # V2bX 证书绑定的域名
 NFU_PRESET_OUT_AREA_NAME="JP Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
 NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
-
+ROUTE_CONFIG_URL="https://config.nfdns.xyz/nfu_sh/config/xrayr/route.json"
+V2BX_CONFIG_DIR="/etc/V2bX"
+CUSTOM_OUTBOUND_CONFIG_FILE="$V2BX_CONFIG_DIR/custom_outbound.json"
+ROUTE_CONFIG_FILE="$V2BX_CONFIG_DIR/route.json"
 
 # === 检查是否为root用户 ===
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：${RESET} 必须使用root用户运行此脚本！\n" && exit 1
@@ -35,7 +38,7 @@ NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU �
 # === 安装依赖函数 ===
 install_dependencies() {
     echo -e "${YELLOW}检查并安装依赖...${RESET}"
-    packages=("sudo" "sed" "wget" "jq" "curl" "bc")
+    packages=("sudo" "sed" "wget" "curl" "bc" "awk")
     for pkg in "${packages[@]}"; do
         if ! command -v "$pkg" &> /dev/null; then
             echo -e "${YELLOW}未找到 $pkg，正在安装...${RESET}"
@@ -153,65 +156,82 @@ config_v2bx() {
     echo -e "${GREEN}✅ V2bX 配置完成。${RESET}"
 }
 
-# === 配置 V2bX 出口 ===
-config_v2bx_outbound() {
-    echo -e "\n⚙️ 配置 V2bX 出口..."
-    # 下载服务信息文件
-    wget -O /tmp/service-information.json "$SERVICE_INFO_URL"
-    if [ $? -eq 0 ]; then
-        # 查找与预设名称完全匹配的服务
-        local selected_service=$(jq -c ".[] | select(.name == \"$PRESET_OUT_AREA_NAME\")" /tmp/service-information.json | head -n 1)
-        if [[ -n "$selected_service" ]]; then
-            local selected_domain=$(echo "$selected_service" | jq -r '.domain')
-            local selected_port=$(echo "$selected_service" | jq -r '.port')
-            local selected_cipher=$(echo "$selected_service" | jq -r '.cipher')
+# === 配置 V2bX 出口和路由 (使用 awk 处理 JSON) ===
+config_v2bx_outbound_route() {
+    echo -e "\n⚙️ 配置 V2bX 出口和路由 (使用 awk 处理 JSON)...${RESET}"
 
-            local config_json=$(cat <<EOF
-[
-  {
-    "tag": "IPv4_out",
-    "sendThrough": "0.0.0.0",
-    "protocol": "freedom"
-  },
-  {
-    "protocol": "blackhole",
-    "tag": "block"
-  },
-  {
-    "protocol": "Shadowsocks",
-    "settings": {
-      "servers": [
-        {
-          "address": "$selected_domain",
-          "port": $selected_port,
-          "method": "$selected_cipher",
-          "password": "$UserUUID"
-        }
-      ]
-    },
-    "tag": "unlock"
-  }
-]
-EOF
-)
-            # 将生成的 JSON 写入 V2bX 配置文件
-            echo "$config_json" | sudo tee "$V2BX_CONFIG_FILE" > /dev/null
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✅ V2bX 出口配置已更新为 ${PRESET_OUT_AREA_NAME} (${selected_domain}:${selected_port}).${RESET}"
-                # 可以选择在这里重启 V2bX 服务，如果需要立即生效
-                if command -v v2bx >/dev/null 2>&1; then
-                    sudo v2bx restart
-                    echo -e "${GREEN}✅ V2bX 服务已重启以应用配置。${RESET}"
+    # 下载 service-information.json
+    echo -e "${YELLOW}⬇️ 下载 service-information.json...${RESET}"
+    local service_info=$(curl -s "$SERVICE_INFO_URL")
+    local service_info_status=$?
+
+    if [ $service_info_status -eq 0 ]; then
+        # 查找预设出口信息 (使用 awk)
+        local outbound_address=$(echo "$service_info" | awk -F'"' -v target="$PRESET_OUT_AREA_NAME" '$2 == "name" && $4 == target {getline; if ($2 == "domain") print $4}')
+        local outbound_port=$(echo "$service_info" | awk -F'"' -v target="$PRESET_OUT_AREA_NAME" '$2 == "name" && $4 == target {getline; getline; if ($2 == "port") print $4}')
+
+        if [[ -n "$outbound_address" && -n "$outbound_port" ]]; then
+            echo "找到预设出口: 地址=$outbound_address, 端口=$outbound_port"
+
+            # 下载 custom_outbound.json
+            echo -e "${YELLOW}⬇️ 下载 custom_outbound.json...${RESET}"
+            local custom_outbound_config=$(curl -s "$CUSTOM_OUTBOUND_CONFIG_URL")
+            local custom_outbound_status=$?
+
+            if [ $custom_outbound_status -eq 0 ]; then
+                echo -e "${YELLOW}🔄 配置 custom_outbound.json...${RESET}"
+
+                # 使用 awk 替换 "unlock" 部分的 address 和 port，以及替换 UUID
+                local updated_custom_outbound=$(echo "$custom_outbound_config" | \
+                    awk -v addr="$outbound_address" -v port="$outbound_port" -v uuid="$UserUUID" '
+                    {
+                        gsub(/{Out}/, addr)
+                        gsub(/{OutPort}/, port)
+                        gsub(/{UUID}/, uuid)
+                        print
+                    }
+                    ')
+
+                local awk_status=$?
+                echo "awk 状态码: $awk_status"
+
+                if [ $awk_status -eq 0 ]; then
+                    echo -e "${YELLOW}💾 写入 $CUSTOM_OUTBOUND_CONFIG_FILE ...${RESET}"
+                    echo "$updated_custom_outbound" | sudo tee "$CUSTOM_OUTBOUND_CONFIG_FILE" > /dev/null
+                    local write_status=$?
+                    if [ $write_status -eq 0 ]; then
+                        echo -e "${GREEN}✅ custom_outbound.json 配置完成。${RESET}"
+                    else
+                        echo -e "${RED}❌ 写入 $CUSTOM_OUTBOUND_CONFIG_FILE 失败，请检查权限或文件路径。${RESET}"
+                    fi
+                else
+                    echo -e "${RED}❌ awk 处理 custom_outbound.json 失败。${RESET}"
                 fi
             else
-                echo -e "${RED}❌ 写入 V2bX 配置文件失败，请检查权限或文件路径。${RESET}"
+                echo -e "${RED}❌ 下载 custom_outbound.json 失败，请检查 URL。${RESET}"
             fi
         else
-            echo -e "${YELLOW}⚠️ 未在服务列表中找到名称为 \"$PRESET_OUT_AREA_NAME\" 的出口，请检查 ${SERVICE_INFO_URL}${RESET}"
+            echo -e "${YELLOW}⚠️ 未在 service-information.json 中找到名称为 \"$PRESET_OUT_AREA_NAME\" 的出口。${RESET}"
         fi
-        rm -f /tmp/service-information.json
     else
-        echo -e "${RED}❌ 无法下载服务信息文件，无法配置 V2bX 出口。${RESET}"
+        echo -e "${RED}❌ 下载 service-information.json 失败，无法配置 V2bX 出口。${RESET}"
+    fi
+
+    # 下载 route.json 并覆盖
+    echo -e "${YELLOW}⬇️ 下载 route.json 并覆盖...${RESET}"
+    curl -s "$ROUTE_CONFIG_URL" | sudo tee "$ROUTE_CONFIG_FILE" > /dev/null
+    local route_download_status=$?
+    echo "route.json 下载状态码: $route_download_status"
+    if [ $route_download_status -eq 0 ]; then
+        echo -e "${GREEN}✅ route.json 配置完成。${RESET}"
+    else
+        echo -e "${RED}❌ 下载或写入 $ROUTE_CONFIG_FILE 失败，请检查 URL 或权限。${RESET}"
+    fi
+
+    # 可以选择在这里重启 V2bX 服务，如果需要立即生效
+    if command -v v2bx >/dev/null 2>&1; then
+        sudo v2bx restart
+        echo -e "${GREEN}✅ V2bX 服务已重启以应用配置。${RESET}"
     fi
 }
 
@@ -231,10 +251,10 @@ install_v2bx
 # 4. 配置 V2bX 节点
 config_v2bx
 
-# 5. 配置 V2bX 出口
-config_v2bx_outbound
+# 5. 配置 V2bX 出口和路由 (使用 awk 处理 JSON)
+config_v2bx_outbound_route
 
 echo -e "\n${GREEN}🎉 所有步骤已完成！${RESET}"
-echo -e "V2bX 已安装并配置为使用 ${PRESET_OUT_AREA_NAME} 出口 (如果找到)。"
+echo -e "V2bX 已安装并配置出口和路由。"
 
 exit 0

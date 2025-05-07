@@ -17,14 +17,14 @@ CFUSER="zzzxxx5745@gmail.com"  # 你的 Cloudflare 邮箱，用于更新 DNS 记
 DNS_ZONE_1="chaoyueemail.com"      # 你要更新的第一个 Cloudflare 域名
 DNS_RECORD_1="sg2.b01d1e-cdd6-4a11-9fb8-1c45613e3eabsfssf"        # 你要更新的第一个 Cloudflare DNS 记录名称 (例如: vps)
 DNS_ZONE_2="myyemail.com"      # 你要更新的第二个 Cloudflare 域名 (如果需要)
-DNS_RECORD_2="sg2.ab-c789-4500-8caf-d2a37755fe09"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
+DNS_RECORD_2="sg2"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
 V2BX_API_HOST="https://f.964444.xyz" # 你的 V2bX API 地址
 V2BX_API_KEY="OQO20TUNNFZKaT7w9yK7iE"    # 你的 V2bX API 密钥
 V2BX_NODE_ID="16"         # 你希望在 V2bX 中使用的节点 ID
 V2BX_NODE_TYPE="vless"              # 你希望在 V2bX 中使用的节点类型 (例如: vless, trojan)
 V2BX_CORE_TYPE="xray"               # 你希望 V2bX 使用的核心 (例如: xray, sing-box)
-V2BX_CERT_MODE="dns"               # V2bX 证书获取方式 (例如: http, tls, none)
-V2BX_CERT_DOMAIN="sg2.b01d1e-cdd6-4a11-9fb8-1c45613e3eabsfssf.chaoyueemail.com" # V2bX 证书绑定的域名
+V2BX_CERT_MODE="file"               # V2bX 证书获取方式 (例如: http, tls, none)
+V2BX_CERT_DOMAIN="sg2.chaoyueemail.com" # V2bX 证书绑定的域名
 NFU_PRESET_OUT_AREA_NAME="SG Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
 NFU_SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # NFU 服务信息 URL
 
@@ -107,8 +107,6 @@ update_record() {
   fi
 }
 
-echo -e "${CYAN}⏳ 等待 2 分钟以确保 DNS 记录生效...${RESET}"
-sleep 120
 
 # === 安装 V2bX 函数 ===
 install_v2bx() {
@@ -116,6 +114,27 @@ install_v2bx() {
     wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
     echo -e "n" | bash install.sh
 }
+
+# === 拉取 TLS 证书 ===
+echo -e "\n🔐 正在拉取 TLS 证书..."
+
+CERT_DIR="/etc/V2bX"
+CERT_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/cert.pem"
+KEY_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/key.pem"
+
+mkdir -p "$CERT_DIR"
+
+# 下载证书
+curl -fsSL -o "$CERT_DIR/fullchain.cer" "$CERT_URL"
+curl -fsSL -o "$CERT_DIR/cert.key" "$KEY_URL"
+
+# 校验下载结果
+if [[ -f "$CERT_DIR/fullchain.cer" && -f "$CERT_DIR/cert.key" ]]; then
+  echo -e "✅ TLS 证书下载完成，保存至 $CERT_DIR"
+else
+  echo -e "❌ 证书下载失败，请检查 GitHub 地址或网络连接"
+  exit 1
+fi
 
 # === 配置 V2bX 节点函数 ===
 config_v2bx() {

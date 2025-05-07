@@ -107,6 +107,13 @@ update_record() {
   fi
 }
 
+# === 安装 V2bX 函数 ===
+install_v2bx() {
+    echo -e "\n📦 安装 V2bX..."
+    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
+    echo -e "n" | bash install.sh
+}
+
 echo -e "\n🔐 正在拉取 TLS 证书..."
 
 CERT_DIR="/etc/V2bX"
@@ -126,14 +133,6 @@ else
   echo -e "❌ 证书下载失败，请检查 GitHub 地址或网络连接"
   exit 1
 fi
-
-
-# === 安装 V2bX 函数 ===
-install_v2bx() {
-    echo -e "\n📦 安装 V2bX..."
-    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
-    echo -e "n" | bash install.sh
-}
 
 # === 配置 V2bX 节点函数 ===
 config_v2bx() {

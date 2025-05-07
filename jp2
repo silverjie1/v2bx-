@@ -114,8 +114,25 @@ install_v2bx() {
     echo -e "n" | bash install.sh
 }
 
-echo -e "${CYAN}⏳ 等待 2 分钟以确保 DNS 记录生效...${RESET}"
-sleep 120
+echo -e "\n🔐 正在拉取 TLS 证书..."
+
+CERT_DIR="/etc/V2bX"
+CERT_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/cert.pem"
+KEY_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/key.pem"
+
+mkdir -p "$CERT_DIR"
+
+# 下载证书
+curl -fsSL -o "$CERT_DIR/fullchain.cer" "$CERT_URL"
+curl -fsSL -o "$CERT_DIR/cert.key" "$KEY_URL"
+
+# 校验下载结果
+if [[ -f "$CERT_DIR/fullchain.cer" && -f "$CERT_DIR/cert.key" ]]; then
+  echo -e "✅ TLS 证书下载完成，保存至 $CERT_DIR"
+else
+  echo -e "❌ 证书下载失败，请检查 GitHub 地址或网络连接"
+  exit 1
+fi
 
 # === 配置 V2bX 节点函数 ===
 config_v2bx() {

@@ -1,435 +1,261 @@
 #!/bin/bash
 
-# 设置颜色变量
+# === 颜色定义 ===
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-NC='\033[0m' # 无颜色
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[0;37m'
+RESET='\033[0m'
 
-# 定义v2bx变量
-v2bx_config="/etc/V2bX/config.json"
+# === 预定义参数 (请务必替换为你的实际值) ===
+UserUUID="e74e2aa9-ce78-4c56-abaf-128841b810d0"            # 你的 NF Unlock 用户 UUID，用于 NFU 脚本
+CFKEY="a3f180b1491efcf9a015dd22d02b05bf3a23c"   # 你的 Cloudflare API 密钥，用于更新 DNS 记录
+CFUSER="zzzxxx5745@gmail.com"  # 你的 Cloudflare 邮箱，用于更新 DNS 记录
+DNS_ZONE_1="chaoyueemail.com"      # 你要更新的第一个 Cloudflare 域名
+DNS_RECORD_1="hk3"        # 你要更新的第一个 Cloudflare DNS 记录名称 (例如: vps)
+DNS_ZONE_2="myyemail.com"      # 你要更新的第二个 Cloudflare 域名 (如果需要)
+DNS_RECORD_2="hk3.ab-c789-4500-8caf-d2a37755fe09"        # 你要更新的第二个 Cloudflare DNS 记录名称 (如果需要)
+V2BX_API_HOST="https://f.964444.xyz" # 你的 V2bX API 地址
+V2BX_API_KEY="OQO20TUNNFZKaT7w9yK7iE"    # 你的 V2bX API 密钥
+V2BX_NODE_ID="8"         # 你希望在 V2bX 中使用的节点 ID
+V2BX_NODE_TYPE="vless"              # 你希望在 V2bX 中使用的节点类型 (例如: vless, trojan)
+V2BX_CORE_TYPE="xray"               # 你希望 V2bX 使用的核心 (例如: xray, sing-box)
+V2BX_CERT_MODE="file"               # V2bX 证书获取方式 (例如: http, tls, none)
+V2BX_CERT_DOMAIN="hk3.chaoyueemail.com" # V2bX 证书绑定的域名
+PRESET_OUT_AREA_NAME="HK Out"    # NFU 预设出口地区名称 (必须与 service-information.json 中的 "name" 完全匹配)
+SERVICE_INFO_URL="https://config.nfdns.xyz/service-information.json" # 服务信息 URL
+CUSTOM_OUTBOUND_CONFIG_URL="https://config.nfdns.xyz/nfu_sh/config/xrayr/custom_outbound.json"
+ROUTE_CONFIG_URL="https://config.nfdns.xyz/nfu_sh/config/xrayr/route.json"
+V2BX_CONFIG_DIR="/etc/V2bX"
+CUSTOM_OUTBOUND_CONFIG_FILE="$V2BX_CONFIG_DIR/custom_outbound.json"
+ROUTE_CONFIG_FILE="$V2BX_CONFIG_DIR/route.json"
 
-# 默认配置
-DEFAULT_LOG_LEVEL="info"
-DEFAULT_OUTBOUND_CONFIG_PATH="/etc/V2bX/custom_outbound.json" # 默认值
-DEFAULT_ROUTE_CONFIG_PATH="/etc/V2bX/route.json" # 默认值
-DEFAULT_ORIGINAL_PATH="" # 默认值 /etc/V2bX/sing_origin.json 文件不存在，留空
-DEFAULT_API_HOST="https://api.example.com"
-DEFAULT_API_KEY="your_api_key"
-DEFAULT_NODE_ID="1"
-DEFAULT_CORE_TYPE="xray"
-DEFAULT_NODE_TYPE="vless"
-DEFAULT_CERT_MODE="none"
-DEFAULT_CERT_DOMAIN="node.example.com"
-DEFAULT_CF_API_EMAIL=""
-DEFAULT_CF_API_KEY="" # global key  
+# === 检查是否为root用户 ===
+[[ $EUID -ne 0 ]] && echo -e "${RED}错误：${RESET} 必须使用root用户运行此脚本！\n" && exit 1
 
-# 加载配置
-load_config() {
-    declare -gA config
-    if [ -f "$v2bx_config" ]; then
-        local json_content=$(<"$v2bx_config")
-        echo -e "${GREEN}正在加载配置文件，请耐心等待...${NC}"
-        local parsed_config=$(jq -r '{
-            LogLevel: .Log.Level,
-            OutboundConfigPath: .Cores[0].OutboundConfigPath,
-            RouteConfigPath: .Cores[0].RouteConfigPath,
-            OriginalPath: .Cores[0].OriginalPath,
-            ApiHost: .Nodes[0].ApiHost,
-            ApiKey: .Nodes[0].ApiKey,
-            NodeID: .Nodes[0].NodeID,
-            CoreType: .Nodes[0].Core,
-            NodeType: .Nodes[0].NodeType,
-            CertMode: .Nodes[0].CertConfig.CertMode,
-            CertDomain: .Nodes[0].CertConfig.CertDomain,
-            CF_API_EMAIL: .Nodes[0].CertConfig.DNSEnv.CF_API_EMAIL,
-            CF_API_KEY: .Nodes[0].CertConfig.DNSEnv.CF_API_KEY
-        } | to_entries[] | "\(.key)=\(.value)"' <<<"$json_content" 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            declare -A default_config=(
-                [LogLevel]="$DEFAULT_LOG_LEVEL"
-                [OutboundConfigPath]="$DEFAULT_OUTBOUND_CONFIG_PATH"
-                [RouteConfigPath]="$DEFAULT_ROUTE_CONFIG_PATH"
-                [OriginalPath]="$DEFAULT_ORIGINAL_PATH"
-                [ApiHost]="$DEFAULT_API_HOST"
-                [ApiKey]="$DEFAULT_API_KEY"
-                [NodeID]="$DEFAULT_NODE_ID"
-                [CoreType]="$DEFAULT_CORE_TYPE"
-                [NodeType]="$DEFAULT_NODE_TYPE"
-                [CertMode]="$DEFAULT_CERT_MODE"
-                [CertDomain]="$DEFAULT_CERT_DOMAIN"
-                [CF_API_EMAIL]="$DEFAULT_CF_API_EMAIL"
-                [CF_API_KEY]="$DEFAULT_CF_API_KEY"
-            )
-            while IFS='=' read -r key value; do
-                if [ -z "$value" ] || [ "$value" == "null" ]; then
-                    config["$key"]="${default_config[$key]}"
-                else
-                    config["$key"]="$value"
-                fi
-            done <<<"$parsed_config"
-        else
-            echo -e "${RED}配置文件解析失败，使用默认配置${NC}"
-            config=(
-                [LogLevel]="$DEFAULT_LOG_LEVEL"
-                [OutboundConfigPath]="$DEFAULT_OUTBOUND_CONFIG_PATH"
-                [RouteConfigPath]="$DEFAULT_ROUTE_CONFIG_PATH"
-                [OriginalPath]="$DEFAULT_ORIGINAL_PATH"
-                [ApiHost]="$DEFAULT_API_HOST"
-                [ApiKey]="$DEFAULT_API_KEY"
-                [NodeID]="$DEFAULT_NODE_ID"
-                [CoreType]="$DEFAULT_CORE_TYPE"
-                [NodeType]="$DEFAULT_NODE_TYPE"
-                [CertMode]="$DEFAULT_CERT_MODE"
-                [CertDomain]="$DEFAULT_CERT_DOMAIN"
-                [CF_API_EMAIL]="$DEFAULT_CF_API_EMAIL"
-                [CF_API_KEY]="$DEFAULT_CF_API_KEY"
-            )
-        fi
-    else
-        echo -e "${RED}配置文件不存在，使用默认配置${NC}"
-        config=(
-            [LogLevel]="$DEFAULT_LOG_LEVEL"
-            [OutboundConfigPath]="$DEFAULT_OUTBOUND_CONFIG_PATH"
-            [RouteConfigPath]="$DEFAULT_ROUTE_CONFIG_PATH"
-            [OriginalPath]="$DEFAULT_ORIGINAL_PATH"
-            [ApiHost]="$DEFAULT_API_HOST"
-            [ApiKey]="$DEFAULT_API_KEY"
-            [NodeID]="$DEFAULT_NODE_ID"
-            [CoreType]="$DEFAULT_CORE_TYPE"
-            [NodeType]="$DEFAULT_NODE_TYPE"
-            [CertMode]="$DEFAULT_CERT_MODE"
-            [CertDomain]="$DEFAULT_CERT_DOMAIN"
-            [CF_API_EMAIL]="$DEFAULT_CF_API_EMAIL"
-            [CF_API_KEY]="$DEFAULT_CF_API_KEY"
-        )
-    fi
-    for key in "${!config[@]}"; do
-        export "$key"="${config[$key]}"
-    done
-}
-
-# 配置显示函数
-display_config() {
-    load_config
-    echo -e "${GREEN}配置信息如下：${NC}"
-    echo -e "LogLevel:       ${config[LogLevel]}"
-    echo -e "OutboundConfigPath: ${config[OutboundConfigPath]}"
-    echo -e "RouteConfigPath: ${config[RouteConfigPath]}"
-    echo -e "OriginalPath: ${config[OriginalPath]}"
-    echo -e "ApiHost:        ${config[ApiHost]}"
-    echo -e "ApiKey:         ${config[ApiKey]}"
-    echo -e "NodeID:         ${config[NodeID]}"
-    echo -e "CoreType:       ${config[CoreType]}"
-    echo -e "NodeType:       ${config[NodeType]}"
-    echo -e "CertMode:       ${config[CertMode]}"
-    echo -e "CertDomain:     ${config[CertDomain]}"
-    echo -e "CF_API_EMAIL:   ${config[CF_API_EMAIL]}"
-    echo -e "CF_API_KEY:     ${config[CF_API_KEY]}"
-}
-
-# 检查必须的配置变量
-check_required_env() {
-    missing_vars=""
-    # 如果未安装jq 则直接apt安装, 否则直接跳过
-    if ! command -v jq &>/dev/null; then
-        echo -e "${YELLOW}正在安装jq...${NC}"
-        apt install -y jq
-    fi
-    # NodeID 为必要参数
-    if [ -z "$NodeID" ]; then
-        missing_vars="$missing_vars NodeID"
-    fi
-    if [ -n "$missing_vars" ]; then
-        echo -e "${RED}错误：缺少必要的变量：$missing_vars${NC}"
-        return 1
-    fi
-    return 0
-}
-
-# 验证核心类型和节点类型兼容性
-validate_core_node_types() {
-    case "$CoreType" in
-        "xray")
-            core_xray=true
-            case "$NodeType" in
-                "vless" | "vmess" | "shadowsocks" | "trojan")
-                    ;;
-                *)
-                    echo -e "${RED}错误：xray核心不支持该协议：$NodeType${NC}"
-                    echo -e "${YELLOW}xray核心支持的协议：vless, vmess, shadowsocks, trojan${NC}"
-                    return 1
-                    ;;
-            esac
-            ;;
-        "sing")
-            core_sing=true
-            case "$NodeType" in
-                "vless" | "vmess" | "shadowsocks" | "trojan" | "hysteria" | "hysteria2" | "tuic" | "anytls")
-                    ;;
-                *)
-                    echo -e "${RED}错误：sing-box核心不支持该协议：$NodeType${NC}"
-                    echo -e "${YELLOW}sing-box核心支持的协议：vless, vmess, shadowsocks, trojan, hysteria, hysteria2, tuic, anytls${NC}"
-                    return 1
-                    ;;
-            esac
-            ;;
-        "hysteria2")
-            core_hysteria2=true
-            if [ "$NodeType" != "hysteria2" ]; then
-                echo -e "${RED}错误：hysteria2核心仅支持hysteria2协议${NC}"
-                return 1
+# === 安装依赖函数 ===
+install_dependencies() {
+    echo -e "${YELLOW}检查并安装依赖...${RESET}"
+    packages=("sudo" "sed" "wget" "curl" "bc" "awk")
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" &> /dev/null; then
+            echo -e "${YELLOW}未找到 $pkg，正在安装...${RESET}"
+            if [ -x "$(command -v apt-get)" ]; then
+                apt-get update
+                apt-get install -y "$pkg"
+            elif [ -x "$(command -v yum)" ]; then
+                yum install -y "$pkg"
+            else
+                echo -e "${RED}错误：${RESET} 无法找到 apt-get 或 yum，请手动安装 $pkg 并重试。"
+                exit 1
             fi
-            ;;
-        *)
-            echo -e "${RED}错误：未知的核心类型：$CoreType${NC}"
-            echo -e "${YELLOW}支持的核心类型：xray, sing, hysteria2${NC}"
-            return 1
-            ;;
-    esac
-    return 0
-}
-
-# 生成核心配置
-generate_core_config() {
-    cores_config=""
-    if [ "$core_xray" = true ]; then
-        cores_config=$(cat <<EOF
-{
-    "Type": "xray",
-    "Log": {
-        "Level": "$LogLevel",
-        "ErrorPath": "/etc/V2bX/$LogLevel.log"
-    },
-    "OutboundConfigPath": "$OutboundConfigPath",
-    "RouteConfigPath": "$RouteConfigPath"
-}
-EOF
-        )
-        if [ "$core_sing" = true ] || [ "$core_hysteria2" = true ]; then
-            cores_config="$cores_config,"
         fi
-    fi
-
-    if [ "$core_sing" = true ]; then
-        cores_config="$cores_config"$(cat <<EOF
-{
-    "Type": "sing",
-    "Log": {
-        "Level": "$LogLevel",
-        "Timestamp": true
-    },
-    "NTP": {
-        "Enable": true,
-        "Server": "time.apple.com",
-        "ServerPort": 0
-    },
-    "Experimental": {
-        "ClashApi": {
-            "ExternalController": "127.0.0.1:9090",
-            "ExternalUI": "",
-            "Secret": "",
-            "DefaultMode": "rule",
-            "StoreSelected": true,
-            "StoreFakeIP": true
-        }
-    },
-    "OriginalPath": "$OriginalPath"
-}
-EOF
-        )
-        if [ "$core_hysteria2" = true ]; then
-            cores_config="$cores_config,"
-        fi
-    fi
-
-    if [ "$core_hysteria2" = true ]; then
-        cores_config="$cores_config"$(cat <<EOF
-{
-    "Type": "hysteria2",
-    "Log": {
-        "Level": "$LogLevel"
-    },
-    "Hysteria2ConfigPath": "/etc/V2bX/hy2config.yaml",
-    "Obfs": {
-        "Type": "salamander",
-        "Salamander": {
-            "Password": "$(head -c 16 /dev/urandom | xxd -p)"
-        }
-    },
-    "IgnoreClientBandwidth": false,
-    "Masquerade": {
-        "Type": "proxy",
-        "Proxy": {
-            "URL": "https://www.google.com",
-            "RewriteHost": true
-        }
-    },
-    "UdpIdleTimeout": 60,
-    "Network": [
-        "udp",
-        "tcp"
-    ]
-}
-EOF
-        )
-    fi
-
-    cores_config="[$cores_config]"
-}
-
-# 生成节点配置
-generate_node_config() {
-    listen_ip="0.0.0.0"
-    dns_env=$(cat <<EOF
-{
-    "CF_API_EMAIL": "$CF_API_EMAIL",
-    "CF_API_KEY": "$CF_API_KEY"
-}
-EOF
-    )
-    node_config=$(cat <<EOF
-{
-    "Core": "$CoreType",
-    "ApiHost": "$ApiHost",
-    "ApiKey": "$ApiKey",
-    "NodeID": $NodeID,
-    "NodeType": "$NodeType",
-    "Timeout": 30,
-    "ListenIP": "$listen_ip",
-    "SendIP": "0.0.0.0",
-    "DeviceOnlineMinTraffic": 1000,
-    "EnableProxyProtocol": false,
-    "EnableUot": true,
-    "EnableTFO": true,
-    "DNSType": "UseIPv4",
-    "CertConfig": {
-        "CertMode": "$CertMode",
-        "RejectUnknownSni": false,
-        "CertDomain": "$CertDomain",
-        "CertFile": "/etc/V2bX/fullchain.cer",
-        "KeyFile": "/etc/V2bX/cert.key",
-        "Email": "v2bx@github.com",
-        "Provider": "cloudflare",
-        "DNSEnv": $dns_env
-    }
-}
-EOF
-    )
-
-    final_config=$(cat <<EOF
-{
-    "Log": {
-        "Level": "$LogLevel",
-        "Output": ""
-    },
-    "Cores": $cores_config,
-    "Nodes": [
-        $node_config
-    ]
-}
-EOF
-    )
-    if ! mkdir -p /etc/V2bX || ! echo "$final_config" | jq . > $v2bx_config; then
-        echo -e "${RED}配置文件写入失败，请检查权限${NC}" >&2
-        exit 1
-    fi
-}
-
-# 快速设置参数并启动
-quick_setup() {
-    clear   # 清除屏幕输出
-    local start_time=$(date +%s.%N)
-    display_config  # 显示生成前配置信息
-    local end_time=$(date +%s.%N)
-    local elapsed_time=$(echo "$end_time - $start_time" | bc)
-    echo -e "${GREEN}本次加载耗时：$elapsed_time 秒${NC}" 
-    # 处理命令行参数,支持全部变量参数
-    for arg in "$@"; do
-        case $arg in
-            LogLevel=*)
-                LogLevel="${arg#*=}"
-                ;;
-            ApiHost=*)
-                ApiHost="${arg#*=}"
-                ;;
-            ApiKey=*)
-                ApiKey="${arg#*=}"
-                ;;
-            NodeID=*)
-                NodeID="${arg#*=}"
-                ;;
-            CoreType=*)
-                CoreType="${arg#*=}"
-                ;;
-            NodeType=*)
-                NodeType="${arg#*=}"
-                ;;
-            CertMode=*)
-                CertMode="${arg#*=}"
-                ;;
-            CertDomain=*)
-                CertDomain="${arg#*=}"
-                ;;
-            CF_API_EMAIL=*)
-                CF_API_EMAIL="${arg#*=}"
-                ;;
-            CF_API_KEY=*)
-                CF_API_KEY="${arg#*=}"
-                ;;
-            *)
-                echo -e "${YELLOW}忽略非必要参数: $arg${NC}"
-                ;;
-        esac
     done
-    echo -e "${GREEN}正在生成配置文件，请耐心等待...${NC}"
-    local start_time=$(date +%s.%N)
-    generate_full_config  # 生成完整配置
-    local end_time=$(date +%s.%N)
-    local elapsed_time=$(echo "$end_time - $start_time" | bc)
-    echo -e "${GREEN}本次生成耗时：$elapsed_time 秒${NC}"
-    display_config # 显示生成后配置信息
+    echo -e "${GREEN}依赖安装完成。${RESET}"
 }
 
-# 启动服务
-generate_full_config() {
-    # 如果未安装v2bx 则提示安装
-    if ! command -v v2bx &>/dev/null; then
-        echo -e "${YELLOW}检测到未安装v2bx,使用以下命令安装,选择不生成配置文件...${NC}"
-        echo -e "${YELLOW}bash <(curl -Ls https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh) ${NC}"
-    fi 
-    if check_required_env && validate_core_node_types; then
-        generate_core_config
-        generate_node_config
-        echo -e "${GREEN}配置文件已生成，输入 v2bx 命令启动${NC}"
-    fi
-    # 如果 route.json 文件存在，匹配rules数组中是否存在outboundTag为"socks5-warp"且domain为空数组则修改tag
-    if [ -f "/etc/V2bX/route.json" ]; then
-        # 使用jq精确匹配规则结构后再替换
-        if jq -e '.rules[] | select(.outboundTag == "socks5-warp" and .domain == [""])' /etc/V2bX/route.json > /dev/null; then
-            jq '(.. | .outboundTag? | select(. == "socks5-warp")) |= "IPv4_out"' \
-                /etc/V2bX/route.json > /tmp/route.json.tmp && \
-            mv /tmp/route.json.tmp /etc/V2bX/route.json
+# === 获取公网 IPv4 函数 ===
+get_public_ipv4() {
+  local IPV4=$(curl -s http://ipv4.icanhazip.com)
+  if [[ -z "$IPV4" ]]; then
+    echo -e "${RED}❌ 无法获取公网 IP，请检查网络连接。${RESET}"
+    exit 1
+  fi
+  echo "$IPV4"
+}
+
+# === 更新 Cloudflare DNS 记录函数 ===
+update_record() {
+  local CFZONE_NAME=$1
+  local CFRECORD_NAME=$2
+  local IPV4=$3
+
+  echo "➡️ 开始更新 $CFRECORD_NAME.$CFZONE_NAME 的 A 记录..."
+
+  # 获取 Zone ID
+  local ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$CFZONE_NAME" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+  if [[ -z "$ZONE_ID" ]]; then
+    echo -e "${RED}❌ 获取 Zone ID 失败（$CFZONE_NAME）${RESET}"
+    return 1
+  fi
+
+  # 获取 DNS 记录 ID
+  local RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$CFRECORD_NAME.$CFZONE_NAME&type=A" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+
+  if [[ -z "$RECORD_ID" ]]; then
+    echo -e "${RED}❌ 获取 DNS 记录 ID 失败（$CFRECORD_NAME.$CFZONE_NAME）${RESET}"
+    return 1
+  fi
+
+  # 更新 DNS 记录
+  local UPDATE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+    -H "X-Auth-Email: $CFUSER" \
+    -H "X-Auth-Key: $CFKEY" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"A\",\"name\":\"$CFRECORD_NAME.$CFZONE_NAME\",\"content\":\"$IPV4\",\"ttl\":120,\"proxied\":false}")
+
+  if echo "$UPDATE" | grep -q '"success":true'; then
+    echo -e "✅ 成功更新 $CFRECORD_NAME.$CFZONE_NAME -> ${GREEN}$IPV4${RESET}"
+  else
+    echo -e "${RED}❌ 更新失败：$CFRECORD_NAME.$CFZONE_NAME${RESET}"
+    echo "$UPDATE"
+  fi
+}
+
+# === 安装 V2bX 函数 ===
+install_v2bx() {
+    echo -e "\n📦 安装 V2bX..."
+    wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh
+    echo -e "n" | bash install.sh
+}
+
+echo -e "\n🔐 正在拉取 TLS 证书..."
+
+CERT_DIR="/etc/V2bX"
+CERT_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/cert.pem"
+KEY_URL="https://raw.githubusercontent.com/silverjie1/v2bx-/refs/heads/main/key.pem"
+
+mkdir -p "$CERT_DIR"
+
+# 下载证书
+curl -fsSL -o "$CERT_DIR/fullchain.cer" "$CERT_URL"
+curl -fsSL -o "$CERT_DIR/cert.key" "$KEY_URL"
+
+# 校验下载结果
+if [[ -f "$CERT_DIR/fullchain.cer" && -f "$CERT_DIR/cert.key" ]]; then
+  echo -e "✅ TLS 证书下载完成，保存至 $CERT_DIR"
+else
+  echo -e "❌ 证书下载失败，请检查 GitHub 地址或网络连接"
+  exit 1
+fi
+
+# === 配置 V2bX 节点函数 ===
+config_v2bx() {
+    echo -e "\n⚙️ 配置 V2bX 节点..."
+    wget -N https://raw.githubusercontent.com/kuefone/toys/main/sh/v2bx.sh
+    bash v2bx.sh \
+      LogLevel=error \
+      ApiHost="$V2BX_API_HOST" \
+      ApiKey="$V2BX_API_KEY" \
+      NodeID="$V2BX_NODE_ID" \
+      NodeType="$V2BX_NODE_TYPE" \
+      CoreType="$V2BX_CORE_TYPE" \
+      CertMode="$V2BX_CERT_MODE" \
+      CertDomain="$V2BX_CERT_DOMAIN" \
+      CF_API_EMAIL="$CFUSER" \
+      CF_API_KEY="$CFKEY"
+    echo -e "${GREEN}✅ V2bX 配置完成。${RESET}"
+}
+
+# === 配置 V2bX 出口和路由 (使用 awk 处理 JSON) ===
+config_v2bx_outbound_route() {
+    echo -e "\n⚙️ 配置 V2bX 出口和路由 (使用 awk 处理 JSON)...${RESET}"
+
+    # 下载 service-information.json
+    echo -e "${YELLOW}⬇️ 下载 service-information.json...${RESET}"
+    local service_info=$(curl -s "$SERVICE_INFO_URL")
+    local service_info_status=$?
+
+    if [ $service_info_status -eq 0 ]; then
+        # 查找预设出口信息 (使用 awk)
+        local outbound_address=$(echo "$service_info" | awk -F'"' -v target="$PRESET_OUT_AREA_NAME" '$2 == "name" && $4 == target {getline; if ($2 == "domain") print $4}')
+        local outbound_port=$(echo "$service_info" | awk -F'"' -v target="$PRESET_OUT_AREA_NAME" '$2 == "name" && $4 == target {getline; getline; if ($2 == "port") print $4}')
+
+        if [[ -n "$outbound_address" && -n "$outbound_port" ]]; then
+            echo "找到预设出口: 地址=$outbound_address, 端口=$outbound_port"
+
+            # 下载 custom_outbound.json
+            echo -e "${YELLOW}⬇️ 下载 custom_outbound.json...${RESET}"
+            local custom_outbound_config=$(curl -s "$CUSTOM_OUTBOUND_CONFIG_URL")
+            local custom_outbound_status=$?
+
+            if [ $custom_outbound_status -eq 0 ]; then
+                echo -e "${YELLOW}🔄 配置 custom_outbound.json...${RESET}"
+
+                # 使用 awk 替换 "unlock" 部分的 address 和 port，以及替换 UUID
+                local updated_custom_outbound=$(echo "$custom_outbound_config" | \
+                    awk -v addr="$outbound_address" -v port="$outbound_port" -v uuid="$UserUUID" '
+                    {
+                        gsub(/{Out}/, addr)
+                        gsub(/{OutPort}/, port)
+                        gsub(/{UUID}/, uuid)
+                        print
+                    }
+                    ')
+
+                local awk_status=$?
+                echo "awk 状态码: $awk_status"
+
+                if [ $awk_status -eq 0 ]; then
+                    echo -e "${YELLOW}💾 写入 $CUSTOM_OUTBOUND_CONFIG_FILE ...${RESET}"
+                    echo "$updated_custom_outbound" | sudo tee "$CUSTOM_OUTBOUND_CONFIG_FILE" > /dev/null
+                    local write_status=$?
+                    if [ $write_status -eq 0 ]; then
+                        echo -e "${GREEN}✅ custom_outbound.json 配置完成。${RESET}"
+                    else
+                        echo -e "${RED}❌ 写入 $CUSTOM_OUTBOUND_CONFIG_FILE 失败，请检查权限或文件路径。${RESET}"
+                    fi
+                else
+                    echo -e "${RED}❌ awk 处理 custom_outbound.json 失败。${RESET}"
+                fi
+            else
+                echo -e "${RED}❌ 下载 custom_outbound.json 失败，请检查 URL。${RESET}"
+            fi
+        else
+            echo -e "${YELLOW}⚠️ 未在 service-information.json 中找到名称为 \"$PRESET_OUT_AREA_NAME\" 的出口。${RESET}"
         fi
-    fi
-}
-
-# 主函数
-main() {
-    # 检查是否安装 jq 
-    if ! command -v jq &>/dev/null; then
-        echo -e "${YELLOW}正在安装jq...${NC}"
-        apt install -y jq
-    fi
-    # 如果有参数则使用快速设置模式
-    if [ $# -gt 0 ]; then
-        quick_setup "$@"
     else
-        echo -e "${YELLOW} bash v2bx.sh ApiHost=https://api.example.com ApiKey=your_api_key NodeID=1 NodeType=vless ...${NC}"
-        echo -e "${YELLOW} 遇到无法生成配置文件，执行 rm $v2bx_config 后重试${NC}"
+        echo -e "${RED}❌ 下载 service-information.json 失败，无法配置 V2bX 出口。${RESET}"
     fi
-    v2bx restart
+
+    # 下载 route.json 并覆盖
+    echo -e "${YELLOW}⬇️ 下载 route.json 并覆盖...${RESET}"
+    curl -s "$ROUTE_CONFIG_URL" | sudo tee "$ROUTE_CONFIG_FILE" > /dev/null
+    local route_download_status=$?
+    echo "route.json 下载状态码: $route_download_status"
+    if [ $route_download_status -eq 0 ]; then
+        echo -e "${GREEN}✅ route.json 配置完成。${RESET}"
+    else
+        echo -e "${RED}❌ 下载或写入 $ROUTE_CONFIG_FILE 失败，请检查 URL 或权限。${RESET}"
+    fi
+
+    # 可以选择在这里重启 V2bX 服务，如果需要立即生效
+    if command -v v2bx >/dev/null 2>&1; then
+        sudo v2bx restart
+        echo -e "${GREEN}✅ V2bX 服务已重启以应用配置。${RESET}"
+    fi
 }
 
-# 执行主函数
-main "$@"
+# === 主流程 ===
+echo -e "${GREEN}🚀 脚本开始执行...${RESET}"
+
+# 1. 安装依赖
+install_dependencies
+
+# 2. 更新 Cloudflare DNS 记录 (直接调用 get_public_ipv4)
+update_record "$DNS_ZONE_1" "$DNS_RECORD_1" "$(get_public_ipv4)"
+update_record "$DNS_ZONE_2" "$DNS_RECORD_2" "$(get_public_ipv4)"
+
+# 3. 安装 V2bX
+install_v2bx
+
+# 4. 配置 V2bX 节点
+config_v2bx
+
+# 5. 配置 V2bX 出口和路由 (使用 awk 处理 JSON)
+config_v2bx_outbound_route
+
+echo -e "\n${GREEN}🎉 所有步骤已完成！${RESET}"
+echo -e "V2bX 已安装并配置出口和路由。"
+
+exit 0

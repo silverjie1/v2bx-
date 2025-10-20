@@ -142,7 +142,7 @@ fi
 # === 配置 V2bX 节点函数 ===
 config_v2bx() {
     echo -e "\n⚙️ 配置 V2bX 节点..."
-    wget -N https://raw.githubusercontent.com/rebecca554owen/toys/main/sh/v2bx.sh
+    wget -N https://raw.githubusercontent.com/kuefone/toys/main/sh/v2bx.sh
     bash v2bx.sh \
       LogLevel=error \
       ApiHost="$V2BX_API_HOST" \
